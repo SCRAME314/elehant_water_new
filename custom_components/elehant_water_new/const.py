@@ -1,7 +1,7 @@
 """Constants for Elehant Water integration."""
 from homeassistant.const import Platform
 
-DOMAIN = "elehant_water"
+DOMAIN = "elehant_water_new"
 PLATFORMS = [Platform.SENSOR]
 
 # Configuration
