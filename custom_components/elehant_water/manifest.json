@@ -1,9 +1,11 @@
 {
-    "domain": "elehant_water",
-    "name": "Elehant Water",
-    "documentation": "https://github.com/SzenProgs/elehant_water",
-    "issue_tracker": "https://github.com/SzenProgs/elehant_water/issues",
-    "codeowners": ["@SzenProgs"],
-    "requirements": ["aioblescan>=0.2.6"],
-    "version": "0.6.1"
-}
+  "domain": "elehant_water",
+  "name": "Elehant Water and Gas Sensors",
+  "codeowners": ["@SzenProgs", "@fess17", "@SCRAME314"],
+  "config_flow": true,
+  "dependencies": ["bluetooth"],
+  "documentation": "https://github.com/SCRAME314/elehant_water",
+  "integration_type": "hub",
+  "iot_class": "local_polling",
+  "requirements": [],
+  "version": "1.1.0"
