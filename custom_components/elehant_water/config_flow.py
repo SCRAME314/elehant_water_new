@@ -153,6 +153,7 @@ class ElehantWaterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             return self.async_create_entry(
                 title=f"Elehant Sensors ({len(self.devices)} devices)",
                 data=self.data,
+                options=self.data,  # 👈 ВОТ ЭТА СТРОКА - добавляем options для OptionsFlow
             )
 
         return self.async_show_form(
@@ -180,7 +181,6 @@ class ElehantWaterOptionsFlow(config_entries.OptionsFlow):
     def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
         """Initialize options flow."""
         self.config_entry = config_entry
-        self.devices = config_entry.data.get(CONF_DEVICES, [])
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
@@ -188,9 +188,7 @@ class ElehantWaterOptionsFlow(config_entries.OptionsFlow):
         """Manage the options."""
         if user_input is not None:
             # Update scan parameters
-            data = dict(self.config_entry.data)
-            data.update(user_input)
-            return self.async_create_entry(title="", data=data)
+            return self.async_create_entry(title="", data=user_input)
 
         return self.async_show_form(
             step_id="init",
@@ -198,7 +196,8 @@ class ElehantWaterOptionsFlow(config_entries.OptionsFlow):
                 {
                     vol.Required(
                         CONF_SCAN_DURATION,
-                        default=self.config_entry.data.get(CONF_SCAN_DURATION, DEFAULT_SCAN_DURATION),
+                        default=self.config_entry.options.get(CONF_SCAN_DURATION, 
+                                                             self.config_entry.data.get(CONF_SCAN_DURATION, DEFAULT_SCAN_DURATION)),
                     ): selector.NumberSelector(
                         selector.NumberSelectorConfig(
                             min=1, max=60, unit_of_measurement="seconds", mode=selector.NumberSelectorMode.BOX
@@ -206,7 +205,8 @@ class ElehantWaterOptionsFlow(config_entries.OptionsFlow):
                     ),
                     vol.Required(
                         CONF_SCAN_INTERVAL,
-                        default=self.config_entry.data.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL),
+                        default=self.config_entry.options.get(CONF_SCAN_INTERVAL,
+                                                              self.config_entry.data.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)),
                     ): selector.NumberSelector(
                         selector.NumberSelectorConfig(
                             min=10, max=3600, unit_of_measurement="seconds", mode=selector.NumberSelectorMode.BOX
