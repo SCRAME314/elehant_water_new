@@ -1,390 +1,418 @@
-from time import sleep
-from datetime import timedelta, datetime
-import aioblescan as aiobs
+"""Platform for Elehant Water sensor integration."""
+from __future__ import annotations
+
 import asyncio
-import time
-from homeassistant.helpers.entity import Entity
-from homeassistant.helpers.event import track_time_interval
-from homeassistant.components.sensor import SensorEntity, SensorStateClass, SensorDeviceClass
-import random
+from datetime import timedelta
 import logging
-#from homeassistant.const import (
-#	VOLUME_LITERS,
-#	STATE_UNKNOWN,
-#	VOLUME_CUBIC_METERS,
-#	TEMP_CELSIUS,
-#)
-from homeassistant.const import STATE_UNKNOWN, UnitOfVolume, UnitOfTemperature
-#counters_mac = {
-#	gas: [
-#		'b0:10:01',
-#		'b0:11:01',
-#		'b0:12:01',
-#		'b0:32:01',
-#		'b0:42:01'
-#	],
-#	water: [
-#		'b0:01:02',
-#		'b0:02:02'
-#	],
-#	water2: [
-#		'b0:03:02',
-#		'b0:05:02'
-#	],
-#	water3: [
-#		'b0:04:02',
-#		'b0:06:02'
-#	],
-#}
+from typing import Any
 
-_LOGGER = logging.getLogger("elehant_water")
-inf = {}
-_LOGGER.debug("init")
+from homeassistant.components.bluetooth import (
+    BluetoothScanningMode,
+    BluetoothServiceInfoBleak,
+    async_discovered_service_info,
+    async_process_advertisements,
+)
+from homeassistant.components.sensor import (
+    SensorDeviceClass,
+    SensorEntity,
+    SensorStateClass,
+)
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import (
+    CONF_ID,
+    CONF_NAME,
+    CONF_TYPE,
+    UnitOfTemperature,
+    UnitOfVolume,
+)
+from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers.entity import DeviceInfo
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.event import async_track_time_interval
+from homeassistant.helpers.typing import StateType
 
+from .const import (
+    DOMAIN,
+    CONF_DEVICES,
+    CONF_MEASUREMENT_WATER,
+    CONF_MEASUREMENT_GAS,
+    CONF_SCAN_DURATION,
+    CONF_SCAN_INTERVAL,
+    CONF_WATER_TYPE,
+    CONF_NAME_TEMP,
+    DEVICE_TYPE_WATER,
+    DEVICE_TYPE_GAS,
+    WATER_TYPE_HOT,
+    WATER_TYPE_COLD,
+    MEASUREMENT_LITERS,
+    MEASUREMENT_CUBIC_METERS,
+    ATTR_BATTERY_LEVEL,
+    ATTR_RSSI,
+    ATTR_TEMPERATURE,
+    ATTR_LAST_SEEN,
+    ATTR_COUNTER_VALUE,
+)
 
-def stop_loop(loop):
-	#_LOGGER.debug("Entering function stop_loop()..")
-	loop.stop()
-	#_LOGGER.debug("Exiting function stop_loop()..")
+_LOGGER = logging.getLogger(__name__)
 
-def update_counters(call):
-	global scan_duration, current_event_loop
-	# _LOGGER.setLevel(logging.DEBUG)
-	#_LOGGER.debug("scan_duration = %s, current_event_loop = %s", str(scan_duration), str(current_event_loop))
+# Elehant BLE Service UUID
+ELEHANT_SERVICE_UUID = "0000fff0-0000-1000-8000-00805f9b34fb"
+ELEHANT_MANUFACTURER_ID = 0xFFFF  # Elehant manufacturer ID
 
-	def my_process(data):
-		# _LOGGER.debug("Entering function <my_process> with arg = %s", str(data))
-		ev = aiobs.HCI_Event()
-		xx = ev.decode(data)
-		try:
-			mac = ev.retrieve("peer")[0].val
-		except:
-			return
-
-		mac = str(mac).lower()
-
-		# _LOGGER.debug("Found MAC = %s", str(mac))
-		"""СГБТ-1.8, СГБТ-3.2, СГБТ-4.0, СГБТ-4.0 ТК, СОНИК G4ТК"""
-		if (str(mac).find('b0:10:01') !=-1) or (str(mac).find('b0:11:01') !=-1) or (str(mac).find('b0:12:01') !=-1) or (str(mac).find('b0:32:01') !=-1) or (str(mac).find('b0:42:01') !=-1):
-			#_LOGGER.debug("SEE gaz counter")
-			manufacturer_data = ev.retrieve("Manufacturer Specific Data")
-			payload = manufacturer_data[0].payload
-			payload = payload[1].val
-			#_LOGGER.debug("Payload: %s", payload)
-			c_num = int.from_bytes(payload[6:9], byteorder='little')
-			c_count = int.from_bytes(payload[9:13], byteorder='little')
-			if measurement_gas == 'm3':
-				inf[c_num] = c_count/10000
-			else:
-				inf[c_num] = c_count/10
-
-		"""СВД-15, СВД-20"""
-		if (str(mac).find('b0:01:02') !=-1) or (str(mac).find('b0:02:02') !=-1):
-			#_LOGGER.debug("SEE 1 tariff counter")
-			manufacturer_data = ev.retrieve("Manufacturer Specific Data")
-			payload = manufacturer_data[0].payload
-			payload = payload[1].val
-			c_num = int.from_bytes(payload[6:9], byteorder="little")
-			c_count = int.from_bytes(payload[9:13], byteorder="little")
-			c_temp = int.from_bytes(payload[14:16], byteorder="little") / 100
-			inf[str(c_num) + '_temp'] = c_temp;
-			#_LOGGER.debug("Test temperature: %s", str(c_temp))
-			if measurement_water == "m3":
-				inf[c_num] = c_count / 10000
-			else:
-				inf[c_num] = c_count / 10
-
-		"""СВТ-15 холодная, СВТ-15 горячая, СВТ-20 холодная, СВТ-20 горячая"""
-		if (str(mac).find('b0:03:02') !=-1) or (str(mac).find('b0:04:02') !=-1) or (str(mac).find('b0:05:02') !=-1) or (str(mac).find('b0:06:02') !=-1):
-			#_LOGGER.debug("SEE 2 tariff counter")
-			manufacturer_data = ev.retrieve("Manufacturer Specific Data")
-			payload = manufacturer_data[0].payload
-			payload = payload[1].val
-			c_num = int.from_bytes(payload[6:9], byteorder="little")
-			_LOGGER.debug("SEE 2 tariff counter [%s]: %s", c_num, payload)
-			if (str(mac).find('b0:03:02') !=-1) or (str(mac).find('b0:05:02') !=-1):
-				c_num = str(c_num) + "_1"
-			else:
-				c_num = str(c_num) + "_2"
-			c_count = int.from_bytes(payload[9:13], byteorder="little")
-			c_temp = int.from_bytes(payload[14:16], byteorder="little") / 100
-			inf[c_num.split("_")[0] + '_temp'] = c_temp
-			if measurement_water == "m3":
-				inf[c_num] = c_count / 10000
-			else:
-				inf[c_num] = c_count / 10
-		#_LOGGER.debug(inf)
-
-	if current_event_loop is None:
-		#_LOGGER.debug("Starting new loop..")
-		current_event_loop = asyncio.new_event_loop()
-		asyncio.set_event_loop(current_event_loop)
-	mysocket = aiobs.create_bt_socket(0)
-	fac = getattr(current_event_loop, "_create_connection_transport")(
-		mysocket, aiobs.BLEScanRequester, None, None
-	)
-	conn, btctrl = current_event_loop.run_until_complete(fac)
-	btctrl.process = my_process
-	#_LOGGER.debug("Send scan request..")
-	current_event_loop.run_until_complete(btctrl.send_scan_request())
-	#_LOGGER.debug("..finish scan request")
-	current_event_loop.call_later(scan_duration, stop_loop, current_event_loop)
-	try:
-		#_LOGGER.debug("Run loop forever..")
-		current_event_loop.run_forever()
-		#_LOGGER.debug("Did we reach that point?")
-	finally:
-		#_LOGGER.debug("Close loop..")
-		# current_event_loop(btctrl.stop_scan_request())
-		current_event_loop.run_until_complete(btctrl.stop_scan_request())
-		conn.close()
-		current_event_loop.run_until_complete(asyncio.sleep(0))
-		current_event_loop.close()
-		current_event_loop = None
+SCAN_INTERVAL = timedelta(seconds=30)
 
 
-def setup_platform(hass, config, add_entities, discovery_info=None):
-	global scan_interval, scan_duration, measurement_water, measurement_gas, current_event_loop
-	ha_entities = []
-	scan_interval = config["scan_interval"]
-	scan_duration = config["scan_duration"]
-	current_event_loop = None
-	measurement_water = config.get("measurement_water")
-	measurement_gas = config.get("measurement_gas")
-	for device in config["devices"]:
-		if device["type"] == "gas":
-			inf[device["id"]] = STATE_UNKNOWN
-			ha_entities.append(GasSensor(device["id"], device["name"]))
-		else:
-			inf[device["id"]] = STATE_UNKNOWN
-			if "_1" in str(device["id"]):
-				temp_id = device["id"].split("_")[0]
-				inf[temp_id + '_temp'] = STATE_UNKNOWN
-				ha_entities.append(WaterTempSensor(temp_id, device["name_temp"]))
-				ha_entities.append(WaterSensorCold(device["id"], device["name"]))
-			elif "_2" in str(device["id"]):
-				ha_entities.append(WaterSensorHot(device["id"], device["name"]))
-			else:
-				inf[str(device["id"]) + '_temp'] = STATE_UNKNOWN
-				ha_entities.append(WaterTempSensor(device["id"], device["name_temp"]))
-				if device["water_type"] == "hot":
-					ha_entities.append(WaterSensorHot(device["id"], device["name"]))
-				else:
-					ha_entities.append(WaterSensorCold(device["id"], device["name"]))
+async def async_setup_entry(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    async_add_entities: AddEntitiesCallback,
+) -> None:
+    """Set up Elehant Water sensors based on a config entry."""
+    _LOGGER.debug("Setting up Elehant Water sensors from config entry")
+
+    config = entry.data
+    devices = config.get(CONF_DEVICES, [])
+    measurement_water = config.get(CONF_MEASUREMENT_WATER, MEASUREMENT_CUBIC_METERS)
+    measurement_gas = config.get(CONF_MEASUREMENT_GAS, MEASUREMENT_CUBIC_METERS)
+    scan_duration = config.get(CONF_SCAN_DURATION, 10)
+    scan_interval = config.get(CONF_SCAN_INTERVAL, 600)
+
+    entities = []
+    elehant_devices = {}
+
+    # Create entities for each configured device
+    for device_config in devices:
+        device_id = str(device_config[CONF_ID])
+        device_type = device_config[CONF_TYPE]
+        name = device_config[CONF_NAME]
+        water_type = device_config.get(CONF_WATER_TYPE)
+        name_temp = device_config.get(CONF_NAME_TEMP)
+
+        _LOGGER.debug(f"Creating sensor for device {device_id} - {name}")
+
+        # Determine measurement unit
+        if device_type == DEVICE_TYPE_WATER:
+            unit = measurement_water
+        else:
+            unit = measurement_gas
+
+        # Create main counter sensor
+        sensor = ElehantCounterSensor(
+            device_id,
+            name,
+            device_type,
+            unit,
+            water_type,
+        )
+        entities.append(sensor)
+        elehant_devices[device_id] = sensor
+
+        # Create temperature sensor if name_temp is provided
+        if name_temp:
+            temp_sensor = ElehantTemperatureSensor(
+                device_id,
+                name_temp,
+                device_type,
+            )
+            entities.append(temp_sensor)
+            elehant_devices[f"{device_id}_temp"] = temp_sensor
+
+    if not entities:
+        _LOGGER.warning("No Elehant devices configured")
+        return
+
+    # Add all entities
+    async_add_entities(entities)
+
+    # Start the scanner
+    scanner = ElehantScanner(
+        hass,
+        elehant_devices,
+        scan_duration,
+        scan_interval,
+    )
+    await scanner.async_start()
 
 
-	add_entities(ha_entities, True)
-	track_time_interval(hass, update_counters, scan_interval)
+class ElehantCounterSensor(SensorEntity):
+    """Representation of an Elehant counter sensor."""
+
+    def __init__(
+        self,
+        device_id: str,
+        name: str,
+        device_type: str,
+        unit: str,
+        water_type: str | None = None,
+    ) -> None:
+        """Initialize the sensor."""
+        self._device_id = device_id
+        self._device_type = device_type
+        self._water_type = water_type
+        self._unit = unit
+        self._attr_name = name
+        self._attr_unique_id = f"elehant_{device_id}_counter"
+        self._attr_state_class = SensorStateClass.TOTAL_INCREASING
+        self._attr_device_class = SensorDeviceClass.WATER if device_type == DEVICE_TYPE_WATER else SensorDeviceClass.GAS
+        self._attr_native_unit_of_measurement = (
+            UnitOfVolume.CUBIC_METERS if unit == MEASUREMENT_CUBIC_METERS else UnitOfVolume.LITERS
+        )
+        self._attr_icon = "mdi:water" if device_type == DEVICE_TYPE_WATER else "mdi:fire"
+        self._attr_extra_state_attributes = {}
+        self._attr_native_value = None
+        self._last_seen = None
+
+    @property
+    def device_info(self) -> DeviceInfo | None:
+        """Return device information."""
+        return DeviceInfo(
+            identifiers={(DOMAIN, self._device_id)},
+            name=self._attr_name,
+            manufacturer="Elehant",
+            model=f"{self._device_type.capitalize()} Meter",
+            sw_version="1.0",
+        )
+
+    @property
+    def native_value(self) -> StateType:
+        """Return the state of the sensor."""
+        return self._attr_native_value
+
+    @callback
+    def _handle_update(self, data: dict[str, Any]) -> None:
+        """Handle updated data from scanner."""
+        if "counter" in data:
+            # Convert counter value based on unit
+            counter_value = float(data["counter"])
+            if self._unit == MEASUREMENT_CUBIC_METERS and self._device_type == DEVICE_TYPE_WATER:
+                # Convert from liters to cubic meters (1 m³ = 1000 L)
+                counter_value = counter_value / 1000
+            self._attr_native_value = counter_value
+
+        # Update attributes
+        if "battery" in data:
+            self._attr_extra_state_attributes[ATTR_BATTERY_LEVEL] = data["battery"]
+        if "rssi" in data:
+            self._attr_extra_state_attributes[ATTR_RSSI] = data["rssi"]
+        
+        self._last_seen = data.get("timestamp")
+        if self._last_seen:
+            self._attr_extra_state_attributes[ATTR_LAST_SEEN] = self._last_seen
+
+        self.async_write_ha_state()
 
 
-class WaterTempSensor(SensorEntity):
-	"""Representation of a Sensor."""
+class ElehantTemperatureSensor(SensorEntity):
+    """Representation of an Elehant temperature sensor."""
 
-	def __init__(self, counter_num, name):
-		"""Initialize the sensor."""
-		self._state = None
-		self._name = name
-		self._state = STATE_UNKNOWN
-		self._num = counter_num
+    def __init__(
+        self,
+        device_id: str,
+        name: str,
+        device_type: str,
+    ) -> None:
+        """Initialize the sensor."""
+        self._device_id = device_id
+        self._device_type = device_type
+        self._attr_name = name
+        self._attr_unique_id = f"elehant_{device_id}_temperature"
+        self._attr_device_class = SensorDeviceClass.TEMPERATURE
+        self._attr_state_class = SensorStateClass.MEASUREMENT
+        self._attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
+        self._attr_icon = "mdi:thermometer"
+        self._attr_extra_state_attributes = {}
+        self._attr_native_value = None
 
-	@property
-	def name(self):
-		"""Return the name of the sensor."""
-		return self._name
+    @property
+    def device_info(self) -> DeviceInfo | None:
+        """Return device information."""
+        return DeviceInfo(
+            identifiers={(DOMAIN, self._device_id)},
+        )
 
-	@property
-	def state(self):
-		"""Return the state of the sensor."""
-		return self._state
-
-	@property
-	def unit_of_measurement(self):
-		"""Return the unit of measurement."""
-		return  UnitOfTemperature.CELSIUS
-
-	@property
-	def device_class(self):
-		return SensorDeviceClass.TEMPERATURE
-
-	@property
-	def state_class(self):
-		return SensorStateClass.MEASUREMENT
-
-	@property
-	def icon(self):
-		"""Return the unit of measurement."""
-		return "mdi:thermometer-water"
-
-	@property
-	def unique_id(self):
-		"""Return Unique ID"""
-		return "elehant_temp_" + str(self._num)
-
-	def update(self):
-		"""Fetch new state data for the sensor.
-		This is the only method that should fetch new data for Home Assistant.
-		"""
-		# update_counters()
-		self._state = inf[str(self._num) + '_temp']
+    @callback
+    def _handle_update(self, data: dict[str, Any]) -> None:
+        """Handle updated data from scanner."""
+        if "temperature" in data:
+            self._attr_native_value = float(data["temperature"])
+            self.async_write_ha_state()
 
 
-class WaterSensorCold(SensorEntity):
-	"""Representation of a Sensor."""
+class ElehantScanner:
+    """Scan for Elehant devices."""
 
-	def __init__(self, counter_num, name):
-		"""Initialize the sensor."""
-		self._state = None
-		self._name = name
-		self._state = STATE_UNKNOWN
-		self._num = counter_num
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        devices: dict[str, ElehantCounterSensor | ElehantTemperatureSensor],
+        scan_duration: int,
+        scan_interval: int,
+    ) -> None:
+        """Initialize scanner."""
+        self.hass = hass
+        self.devices = devices
+        self.scan_duration = scan_duration
+        self.scan_interval = scan_interval
+        self._scanning = False
+        self._cancel_interval = None
 
-	@property
-	def name(self):
-		"""Return the name of the sensor."""
-		return self._name
+    async def async_start(self) -> None:
+        """Start scanning."""
+        _LOGGER.debug("Starting Elehant scanner")
+        self._cancel_interval = async_track_time_interval(
+            self.hass,
+            self.async_scan,
+            timedelta(seconds=self.scan_interval),
+        )
+        # Start first scan immediately
+        await self.async_scan()
 
-	@property
-	def state(self):
-		"""Return the state of the sensor."""
-		return self._state
+    async def async_stop(self) -> None:
+        """Stop scanning."""
+        if self._cancel_interval:
+            self._cancel_interval()
+            self._cancel_interval = None
 
-	@property
-	def unit_of_measurement(self):
-		"""Return the unit of measurement."""
-		if measurement_water == "m3":
-			return UnitOfVolume.CUBIC_METERS
-		else:
-			return UnitOfVolume.LITERS
+    async def async_scan(self, now=None) -> None:
+        """Perform a scan."""
+        if self._scanning:
+            _LOGGER.debug("Scan already in progress")
+            return
 
-	@property
-	def device_class(self):
-		return SensorDeviceClass.WATER
+        self._scanning = True
+        _LOGGER.debug(f"Starting Elehant scan for {self.scan_duration} seconds")
 
-	@property
-	def state_class(self):
-		return SensorStateClass.TOTAL_INCREASING
+        try:
+            # Get all discovered devices
+            service_infos = async_discovered_service_info(self.hass)
+            
+            for service_info in service_infos:
+                await self._process_device(service_info)
 
-	@property
-	def icon(self):
-		"""Return the unit of measurement."""
-		return "mdi:water"
+            # Start advertisement processing for new devices
+            await self._process_advertisements()
 
-	@property
-	def unique_id(self):
-		"""Return Unique ID"""
-		return "elehant_" + str(self._num)
+        except Exception as err:
+            _LOGGER.error(f"Error during scan: {err}")
+        finally:
+            self._scanning = False
 
-	def update(self):
-		"""Fetch new state data for the sensor.
-		This is the only method that should fetch new data for Home Assistant.
-		"""
-		# update_counters()
-		self._state = inf[self._num]
+    async def _process_advertisements(self) -> None:
+        """Process BLE advertisements."""
+        def device_detected(service_info: BluetoothServiceInfoBleak) -> bool:
+            """Process detected device."""
+            return self._process_device_sync(service_info)
 
+        try:
+            await async_process_advertisements(
+                self.hass,
+                device_detected,
+                {"match": {}},
+                BluetoothScanningMode.ACTIVE,
+                self.scan_duration,
+            )
+        except asyncio.TimeoutError:
+            _LOGGER.debug("Advertisement processing timeout")
+        except Exception as err:
+            _LOGGER.error(f"Error processing advertisements: {err}")
 
-class WaterSensorHot(SensorEntity):
-	"""Representation of a Sensor."""
+    def _process_device_sync(self, service_info: BluetoothServiceInfoBleak) -> bool:
+        """Synchronously process a device."""
+        if not self._is_elehant_device(service_info):
+            return False
 
-	def __init__(self, counter_num, name):
-		"""Initialize the sensor."""
-		self._state = None
-		self._name = name
-		self._state = STATE_UNKNOWN
-		self._num = counter_num
+        # Extract device data
+        device_id = self._extract_device_id(service_info)
+        if not device_id or device_id not in self.devices:
+            return False
 
-	@property
-	def name(self):
-		"""Return the name of the sensor."""
-		return self._name
+        # Parse the advertisement data
+        data = self._parse_advertisement_data(service_info)
+        if data:
+            # Update all sensors for this device
+            main_sensor = self.devices.get(device_id)
+            if main_sensor and isinstance(main_sensor, ElehantCounterSensor):
+                main_sensor._handle_update(data)
 
-	@property
-	def state(self):
-		"""Return the state of the sensor."""
-		return self._state
+            temp_sensor = self.devices.get(f"{device_id}_temp")
+            if temp_sensor and isinstance(temp_sensor, ElehantTemperatureSensor):
+                temp_sensor._handle_update(data)
 
-	@property
-	def unit_of_measurement(self):
-		"""Return the unit of measurement."""
-		if measurement_water == "m3":
-			return UnitOfVolume.CUBIC_METERS
-		else:
-			return UnitOfVolume.LITERS
+        return True
 
-	@property
-	def device_class(self):
-		return SensorDeviceClass.WATER
+    async def _process_device(self, service_info: BluetoothServiceInfoBleak) -> None:
+        """Process a discovered device."""
+        self._process_device_sync(service_info)
 
-	@property
-	def state_class(self):
-		return SensorStateClass.TOTAL_INCREASING
+    def _is_elehant_device(self, service_info: BluetoothServiceInfoBleak) -> bool:
+        """Check if the device is an Elehant sensor."""
+        # Check service UUID
+        if ELEHANT_SERVICE_UUID in service_info.service_uuids:
+            return True
 
-	@property
-	def icon(self):
-		"""Return the unit of measurement."""
-		return "mdi:water-thermometer"
+        # Check manufacturer data
+        if service_info.manufacturer_data and ELEHANT_MANUFACTURER_ID in service_info.manufacturer_data:
+            return True
 
-	@property
-	def unique_id(self):
-		"""Return Unique ID"""
-		return "elehant_" + str(self._num)
+        # Check device name
+        if service_info.name and "ELEHANT" in service_info.name.upper():
+            return True
 
-	def update(self):
-		"""Fetch new state data for the sensor.
-		This is the only method that should fetch new data for Home Assistant.
-		"""
-		# update_counters()
-		self._state = inf[self._num]
+        return False
 
+    def _extract_device_id(self, service_info: BluetoothServiceInfoBleak) -> str | None:
+        """Extract device ID from advertisement data."""
+        # Try to extract from manufacturer data
+        if service_info.manufacturer_data and ELEHANT_MANUFACTURER_ID in service_info.manufacturer_data:
+            mfg_data = service_info.manufacturer_data[ELEHANT_MANUFACTURER_ID]
+            if len(mfg_data) >= 4:
+                # Device ID is usually in the first 4 bytes
+                device_id = int.from_bytes(mfg_data[0:4], byteorder="little")
+                return str(device_id)
 
-class GasSensor(SensorEntity):
-	"""Representation of a Sensor."""
+        # Try to extract from service data
+        for uuid, data in service_info.service_data.items():
+            if ELEHANT_SERVICE_UUID in uuid:
+                if len(data) >= 4:
+                    device_id = int.from_bytes(data[0:4], byteorder="little")
+                    return str(device_id)
 
-	def __init__(self, counter_num, name):
-		"""Initialize the sensor."""
-		self._state = None
-		self._name = name
-		self._state = STATE_UNKNOWN
-		self._num = counter_num
+        # Fallback to MAC address
+        if service_info.address:
+            return service_info.address.replace(":", "")
 
-	@property
-	def name(self):
-		"""Return the name of the sensor."""
-		return self._name
+        return None
 
-	@property
-	def state(self):
-		"""Return the state of the sensor."""
-		return self._state
+    def _parse_advertisement_data(self, service_info: BluetoothServiceInfoBleak) -> dict[str, Any] | None:
+        """Parse the advertisement data from Elehant device."""
+        data = {
+            "rssi": service_info.rssi,
+            "timestamp": service_info.time,
+        }
 
-	@property
-	def unit_of_measurement(self):
-		"""Return the unit of measurement."""
-		if measurement_gas == "m3":
-			return UnitOfVolume.CUBIC_METERS
-		else:
-			return UnitOfVolume.LITERS
+        # Try to parse manufacturer data
+        if service_info.manufacturer_data and ELEHANT_MANUFACTURER_ID in service_info.manufacturer_data:
+            mfg_data = service_info.manufacturer_data[ELEHANT_MANUFACTURER_ID]
+            if len(mfg_data) >= 8:
+                # Counter value is usually in bytes 4-8
+                data["counter"] = int.from_bytes(mfg_data[4:8], byteorder="little")
+                # Battery level might be in byte 8 or 9
+                if len(mfg_data) >= 9:
+                    data["battery"] = mfg_data[8]
+                # Temperature might be in bytes 10-11
+                if len(mfg_data) >= 12:
+                    temp_raw = int.from_bytes(mfg_data[10:12], byteorder="little", signed=True)
+                    data["temperature"] = temp_raw / 10.0
 
-	@property
-	def device_class(self):
-		return SensorDeviceClass.GAS
+        # Try to parse service data
+        for uuid, srv_data in service_info.service_data.items():
+            if ELEHANT_SERVICE_UUID in uuid and len(srv_data) >= 8:
+                data["counter"] = int.from_bytes(srv_data[4:8], byteorder="little")
+                if len(srv_data) >= 9:
+                    data["battery"] = srv_data[8]
+                if len(srv_data) >= 12:
+                    temp_raw = int.from_bytes(srv_data[10:12], byteorder="little", signed=True)
+                    data["temperature"] = temp_raw / 10.0
+                break
 
-	@property
-	def state_class(self):
-		return SensorStateClass.TOTAL_INCREASING
-
-	@property
-	def icon(self):
-		"""Return the unit of measurement."""
-		return "mdi:gas-burner"
-
-	@property
-	def unique_id(self):
-		"""Return Unique ID"""
-		return "elehant_" + str(self._num)
-
-	def update(self):
-		"""Fetch new state data for the sensor.
-		This is the only method that should fetch new data for Home Assistant.
-		"""
-		# update_counters()
-		self._state = inf[self._num]
+        return data if "counter" in data else None
