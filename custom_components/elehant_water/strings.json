@@ -1,0 +1,78 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Elehant Sensors - Basic Settings",
+        "description": "Configure basic scanning parameters for Elehant water and gas sensors.",
+        "data": {
+          "scan_duration": "Scan duration (seconds)",
+          "scan_interval": "Scan interval (seconds)",
+          "measurement_water": "Water measurement unit",
+          "measurement_gas": "Gas measurement unit"
+        }
+      },
+      "add_device": {
+        "title": "Add Elehant Device",
+        "description": "Add device #{device_number}. Enter the device details below.",
+        "data": {
+          "id": "Device ID (number from the sensor)",
+          "type": "Device type",
+          "name": "Device name",
+          "water_type": "Water type (for water sensors)",
+          "name_temp": "Temperature sensor name (optional)"
+        }
+      },
+      "add_another": {
+        "title": "Add Another Device?",
+        "description": "Do you want to add another Elehant sensor?",
+        "data": {
+          "add_another": "Yes, add another device"
+        }
+      }
+    },
+    "error": {
+      "invalid_id": "Please enter a valid device ID"
+    },
+    "abort": {
+      "already_configured": "This device is already configured"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Elehant Sensors - Options",
+        "description": "Modify scanning parameters.",
+        "data": {
+          "scan_duration": "Scan duration (seconds)",
+          "scan_interval": "Scan interval (seconds)"
+        }
+      }
+    }
+  },
+  "selector": {
+    "measurement_water": {
+      "options": {
+        "l": "Liters",
+        "m3": "Cubic meters"
+      }
+    },
+    "measurement_gas": {
+      "options": {
+        "l": "Liters",
+        "m3": "Cubic meters"
+      }
+    },
+    "device_type": {
+      "options": {
+        "water": "Water meter",
+        "gas": "Gas meter"
+      }
+    },
+    "water_type": {
+      "options": {
+        "hot": "Hot water",
+        "cold": "Cold water"
+      }
+    }
+  }
+}
