@@ -4,7 +4,7 @@
   "codeowners": ["@SzenProgs", "@fess17", "@SCRAME314"],
   "config_flow": true,
   "dependencies": ["bluetooth"],
-  "documentation": "https://github.com/SCRAME314/elehant_water",
+  "documentation": "https://github.com/SCRAME314/elehant_water_new",
   "integration_type": "hub",
   "iot_class": "local_polling",
   "requirements": [],
