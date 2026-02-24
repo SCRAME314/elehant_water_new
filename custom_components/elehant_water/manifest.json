@@ -1,6 +1,6 @@
 {
-  "domain": "elehant_water",
-  "name": "Elehant Water and Gas Sensors",
+  "domain": "elehant_water_new",
+  "name": "Elehant Water and Gas Sensors NEW",
   "codeowners": ["@SzenProgs", "@fess17", "@SCRAME314"],
   "config_flow": true,
   "dependencies": ["bluetooth"],
