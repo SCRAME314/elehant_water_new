@@ -5,6 +5,7 @@ import asyncio
 from datetime import timedelta
 import logging
 from typing import Any
+import subprocess
 
 from homeassistant.components.bluetooth import (
     BluetoothScanningMode,
@@ -70,6 +71,13 @@ async def async_setup_entry(
     """Set up Elehant Water sensors based on a config entry."""
     _LOGGER.debug("Setting up Elehant Water sensors from config entry")
 
+    # Проверяем доступные Bluetooth адаптеры
+    try:
+        result = subprocess.run(['hciconfig'], capture_output=True, text=True, timeout=5)
+        _LOGGER.info(f"🔵 Доступные Bluetooth адаптеры:\n{result.stdout}")
+    except Exception as e:
+        _LOGGER.error(f"Не удалось проверить Bluetooth адаптеры: {e}")
+
     config = entry.data
     devices = config.get(CONF_DEVICES, [])
     measurement_water = config.get(CONF_MEASUREMENT_WATER, MEASUREMENT_CUBIC_METERS)
@@ -77,18 +85,21 @@ async def async_setup_entry(
     scan_duration = config.get(CONF_SCAN_DURATION, 10)
     scan_interval = config.get(CONF_SCAN_INTERVAL, 600)
 
+    _LOGGER.info(f"📊 Настройки сканирования: длительность={scan_duration}с, интервал={scan_interval}с")
+    _LOGGER.info(f"📊 Найдено устройств в конфиге: {len(devices)}")
+
     entities = []
     elehant_devices = {}
 
     # Create entities for each configured device
-    for device_config in devices:
+    for i, device_config in enumerate(devices):
         device_id = str(device_config[CONF_ID])
         device_type = device_config[CONF_TYPE]
         name = device_config[CONF_NAME]
         water_type = device_config.get(CONF_WATER_TYPE)
         name_temp = device_config.get(CONF_NAME_TEMP)
 
-        _LOGGER.debug(f"Creating sensor for device {device_id} - {name}")
+        _LOGGER.debug(f"📝 Создание сенсора для устройства {i+1}: ID={device_id}, тип={device_type}, имя={name}")
 
         # Determine measurement unit
         if device_type == DEVICE_TYPE_WATER:
@@ -109,6 +120,7 @@ async def async_setup_entry(
 
         # Create temperature sensor if name_temp is provided
         if name_temp:
+            _LOGGER.debug(f"🌡️ Создание сенсора температуры для {device_id}: {name_temp}")
             temp_sensor = ElehantTemperatureSensor(
                 device_id,
                 name_temp,
@@ -118,11 +130,12 @@ async def async_setup_entry(
             elehant_devices[f"{device_id}_temp"] = temp_sensor
 
     if not entities:
-        _LOGGER.warning("No Elehant devices configured")
+        _LOGGER.warning("⚠️ Нет настроенных устройств Elehant")
         return
 
     # Add all entities
     async_add_entities(entities)
+    _LOGGER.info(f"✅ Добавлено {len(entities)} сенсоров Elehant")
 
     # Start the scanner
     scanner = ElehantScanner(
@@ -131,7 +144,19 @@ async def async_setup_entry(
         scan_duration,
         scan_interval,
     )
-    await scanner.async_start()
+    
+    # Запускаем сканер в фоне
+    hass.loop.create_task(scanner.async_start())
+    
+    # Сохраняем сканер в hass.data для возможного доступа позже
+    if DOMAIN not in hass.data:
+        hass.data[DOMAIN] = {}
+    if entry.entry_id not in hass.data[DOMAIN]:
+        hass.data[DOMAIN][entry.entry_id] = {}
+    hass.data[DOMAIN][entry.entry_id]["scanner"] = scanner
+    
+    _LOGGER.info("🚀 Сканер Elehant запущен в фоновом режиме")
+    return True
 
 
 class ElehantCounterSensor(SensorEntity):
@@ -161,6 +186,8 @@ class ElehantCounterSensor(SensorEntity):
         self._attr_extra_state_attributes = {}
         self._attr_native_value = None
         self._last_seen = None
+        
+        _LOGGER.debug(f"🏭 Инициализирован счетчик {device_id} с именем {name}")
 
     @property
     def device_info(self) -> DeviceInfo | None:
@@ -181,19 +208,26 @@ class ElehantCounterSensor(SensorEntity):
     @callback
     def _handle_update(self, data: dict[str, Any]) -> None:
         """Handle updated data from scanner."""
+        old_value = self._attr_native_value
+        
         if "counter" in data:
             # Convert counter value based on unit
             counter_value = float(data["counter"])
             if self._unit == MEASUREMENT_CUBIC_METERS and self._device_type == DEVICE_TYPE_WATER:
                 # Convert from liters to cubic meters (1 m³ = 1000 L)
                 counter_value = counter_value / 1000
+            
             self._attr_native_value = counter_value
+            _LOGGER.debug(f"📊 Счетчик {self._device_id}: {old_value} -> {counter_value} (сырые данные: {data['counter']})")
 
         # Update attributes
         if "battery" in data:
             self._attr_extra_state_attributes[ATTR_BATTERY_LEVEL] = data["battery"]
+            _LOGGER.debug(f"🔋 Счетчик {self._device_id}: батарея {data['battery']}%")
+        
         if "rssi" in data:
             self._attr_extra_state_attributes[ATTR_RSSI] = data["rssi"]
+            _LOGGER.debug(f"📶 Счетчик {self._device_id}: RSSI {data['rssi']} dBm")
         
         self._last_seen = data.get("timestamp")
         if self._last_seen:
@@ -222,6 +256,8 @@ class ElehantTemperatureSensor(SensorEntity):
         self._attr_icon = "mdi:thermometer"
         self._attr_extra_state_attributes = {}
         self._attr_native_value = None
+        
+        _LOGGER.debug(f"🌡️ Инициализирован датчик температуры {device_id}")
 
     @property
     def device_info(self) -> DeviceInfo | None:
@@ -234,7 +270,9 @@ class ElehantTemperatureSensor(SensorEntity):
     def _handle_update(self, data: dict[str, Any]) -> None:
         """Handle updated data from scanner."""
         if "temperature" in data:
+            old_temp = self._attr_native_value
             self._attr_native_value = float(data["temperature"])
+            _LOGGER.debug(f"🌡️ Температура {self._device_id}: {old_temp} -> {self._attr_native_value}°C")
             self.async_write_ha_state()
 
 
@@ -255,10 +293,13 @@ class ElehantScanner:
         self.scan_interval = scan_interval
         self._scanning = False
         self._cancel_interval = None
+        self._scan_count = 0
+        
+        _LOGGER.debug(f"🔍 Сканер инициализирован: длительность={scan_duration}с, интервал={scan_interval}с")
 
     async def async_start(self) -> None:
         """Start scanning."""
-        _LOGGER.debug("Starting Elehant scanner")
+        _LOGGER.info("🔵 Запуск сканера Elehant")
         self._cancel_interval = async_track_time_interval(
             self.hass,
             self.async_scan,
@@ -272,30 +313,36 @@ class ElehantScanner:
         if self._cancel_interval:
             self._cancel_interval()
             self._cancel_interval = None
+            _LOGGER.info("🛑 Сканер Elehant остановлен")
 
     async def async_scan(self, now=None) -> None:
         """Perform a scan."""
         if self._scanning:
-            _LOGGER.debug("Scan already in progress")
+            _LOGGER.debug("⏳ Сканирование уже выполняется, пропускаем")
             return
 
         self._scanning = True
-        _LOGGER.debug(f"Starting Elehant scan for {self.scan_duration} seconds")
+        self._scan_count += 1
+        _LOGGER.info(f"🔍 [{self._scan_count}] Начало сканирования Elehant на {self.scan_duration} секунд")
 
         try:
             # Get all discovered devices
             service_infos = async_discovered_service_info(self.hass)
+            _LOGGER.info(f"📡 Всего найдено BLE устройств: {len(service_infos)}")
             
-            for service_info in service_infos:
+            for i, service_info in enumerate(service_infos):
+                _LOGGER.debug(f"  BLE устройство {i+1}: {service_info.address} | Имя: {service_info.name} | RSSI: {service_info.rssi} | UUIDs: {service_info.service_uuids}")
                 await self._process_device(service_info)
 
             # Start advertisement processing for new devices
+            _LOGGER.debug("🎯 Запуск обработки рекламных пакетов...")
             await self._process_advertisements()
 
         except Exception as err:
-            _LOGGER.error(f"Error during scan: {err}")
+            _LOGGER.error(f"❌ Ошибка во время сканирования: {err}", exc_info=True)
         finally:
             self._scanning = False
+            _LOGGER.info(f"✅ [{self._scan_count}] Сканирование завершено")
 
     async def _process_advertisements(self) -> None:
         """Process BLE advertisements."""
@@ -312,9 +359,9 @@ class ElehantScanner:
                 self.scan_duration,
             )
         except asyncio.TimeoutError:
-            _LOGGER.debug("Advertisement processing timeout")
+            _LOGGER.debug("⏱️ Таймаут обработки рекламных пакетов (истекло время сканирования)")
         except Exception as err:
-            _LOGGER.error(f"Error processing advertisements: {err}")
+            _LOGGER.error(f"❌ Ошибка обработки рекламных пакетов: {err}", exc_info=True)
 
     def _process_device_sync(self, service_info: BluetoothServiceInfoBleak) -> bool:
         """Synchronously process a device."""
@@ -323,12 +370,19 @@ class ElehantScanner:
 
         # Extract device data
         device_id = self._extract_device_id(service_info)
-        if not device_id or device_id not in self.devices:
+        if not device_id:
+            _LOGGER.debug(f"⚠️ Не удалось извлечь ID из устройства {service_info.address}")
+            return False
+
+        if device_id not in self.devices:
+            _LOGGER.debug(f"⚠️ Устройство с ID {device_id} не найдено в конфигурации")
             return False
 
         # Parse the advertisement data
         data = self._parse_advertisement_data(service_info)
         if data:
+            _LOGGER.info(f"✅ Получены данные от устройства {device_id}: {data}")
+            
             # Update all sensors for this device
             main_sensor = self.devices.get(device_id)
             if main_sensor and isinstance(main_sensor, ElehantCounterSensor):
@@ -337,6 +391,8 @@ class ElehantScanner:
             temp_sensor = self.devices.get(f"{device_id}_temp")
             if temp_sensor and isinstance(temp_sensor, ElehantTemperatureSensor):
                 temp_sensor._handle_update(data)
+        else:
+            _LOGGER.debug(f"⚠️ Не удалось распарсить данные от {device_id}")
 
         return True
 
@@ -346,16 +402,25 @@ class ElehantScanner:
 
     def _is_elehant_device(self, service_info: BluetoothServiceInfoBleak) -> bool:
         """Check if the device is an Elehant sensor."""
+        _LOGGER.debug(f"🔎 Проверка устройства: {service_info.address}, имя: {service_info.name}, UUIDs: {service_info.service_uuids}")
+        
         # Check service UUID
         if ELEHANT_SERVICE_UUID in service_info.service_uuids:
+            _LOGGER.info(f"✅ Elehant устройство обнаружено по UUID: {service_info.address}")
             return True
 
         # Check manufacturer data
-        if service_info.manufacturer_data and ELEHANT_MANUFACTURER_ID in service_info.manufacturer_data:
-            return True
+        if service_info.manufacturer_data:
+            _LOGGER.debug(f"   Manufacturer data: {service_info.manufacturer_data}")
+            if ELEHANT_MANUFACTURER_ID in service_info.manufacturer_data:
+                mfg_data = service_info.manufacturer_data[ELEHANT_MANUFACTURER_ID]
+                _LOGGER.info(f"✅ Elehant устройство обнаружено по manufacturer ID: {service_info.address}")
+                _LOGGER.debug(f"   Manufacturer data hex: {mfg_data.hex()}")
+                return True
 
         # Check device name
         if service_info.name and "ELEHANT" in service_info.name.upper():
+            _LOGGER.info(f"✅ Elehant устройство обнаружено по имени: {service_info.name}")
             return True
 
         return False
@@ -366,8 +431,8 @@ class ElehantScanner:
         if service_info.manufacturer_data and ELEHANT_MANUFACTURER_ID in service_info.manufacturer_data:
             mfg_data = service_info.manufacturer_data[ELEHANT_MANUFACTURER_ID]
             if len(mfg_data) >= 4:
-                # Device ID is usually in the first 4 bytes
                 device_id = int.from_bytes(mfg_data[0:4], byteorder="little")
+                _LOGGER.debug(f"📟 ID из manufacturer data: {device_id}")
                 return str(device_id)
 
         # Try to extract from service data
@@ -375,10 +440,12 @@ class ElehantScanner:
             if ELEHANT_SERVICE_UUID in uuid:
                 if len(data) >= 4:
                     device_id = int.from_bytes(data[0:4], byteorder="little")
+                    _LOGGER.debug(f"📟 ID из service data: {device_id}")
                     return str(device_id)
 
         # Fallback to MAC address
         if service_info.address:
+            _LOGGER.debug(f"📟 Используем MAC как ID: {service_info.address}")
             return service_info.address.replace(":", "")
 
         return None
@@ -393,6 +460,8 @@ class ElehantScanner:
         # Try to parse manufacturer data
         if service_info.manufacturer_data and ELEHANT_MANUFACTURER_ID in service_info.manufacturer_data:
             mfg_data = service_info.manufacturer_data[ELEHANT_MANUFACTURER_ID]
+            _LOGGER.debug(f"📦 Manufacturer data ({len(mfg_data)} байт): {mfg_data.hex()}")
+            
             if len(mfg_data) >= 8:
                 # Counter value is usually in bytes 4-8
                 data["counter"] = int.from_bytes(mfg_data[4:8], byteorder="little")
@@ -407,6 +476,7 @@ class ElehantScanner:
         # Try to parse service data
         for uuid, srv_data in service_info.service_data.items():
             if ELEHANT_SERVICE_UUID in uuid and len(srv_data) >= 8:
+                _LOGGER.debug(f"📦 Service data ({len(srv_data)} байт): {srv_data.hex()}")
                 data["counter"] = int.from_bytes(srv_data[4:8], byteorder="little")
                 if len(srv_data) >= 9:
                     data["battery"] = srv_data[8]
@@ -415,4 +485,8 @@ class ElehantScanner:
                     data["temperature"] = temp_raw / 10.0
                 break
 
-        return data if "counter" in data else None
+        if "counter" in data:
+            return data
+        else:
+            _LOGGER.debug(f"⚠️ Не найдены данные счетчика в пакете от {service_info.address}")
+            return None
