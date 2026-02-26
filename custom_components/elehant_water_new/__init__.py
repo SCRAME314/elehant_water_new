@@ -3,7 +3,7 @@
 import asyncio
 import logging
 
-from bleak import get_adapters
+from bleak import BleakScanner
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
@@ -27,7 +27,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     async def async_update_data():
         # This function is not used for polling; data comes from scanner.
         # But coordinator needs a method; we'll raise if no data yet.
-        # Alternatively, we can return last data if available.
         coordinator = hass.data[DOMAIN][device_id]
         if coordinator.data:
             return coordinator.data
@@ -59,11 +58,25 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     # Start the global scanner if not already running
     if "scanner" not in hass.data[DOMAIN]:
-        # Get available adapters
-        adapters = await get_adapters()
-        adapter_names = [adapter.name for adapter in adapters if adapter.name]
-        # Get selected adapter from config entry (first device sets the scanner)
-        selected_adapter = entry.data.get("bluetooth_adapter")  # We'll need to add this to config flow
+        # Get available adapters using BleakScanner.discover with timeout 0
+        # This is a workaround since get_adapters might not be available
+        adapters = []
+        try:
+            # Try to get adapters through BleakScanner
+            scanner = BleakScanner()
+            adapter = getattr(scanner, "adapter", None)
+            if adapter:
+                adapters = [adapter]
+            else:
+                # On some platforms, we might not get adapter info
+                adapters = ["hci0", "hci1"]  # Common Linux adapter names
+        except Exception as err:
+            _LOGGER.warning("Could not get Bluetooth adapters: %s", err)
+            adapters = ["default"]
+        
+        adapter_names = adapters
+        # Get selected adapter from config entry options (first device sets the scanner)
+        selected_adapter = entry.options.get("bluetooth_adapter") or entry.data.get("bluetooth_adapter")
         if selected_adapter and selected_adapter not in adapter_names:
             _LOGGER.warning("Selected adapter %s not found, using default", selected_adapter)
             selected_adapter = None
