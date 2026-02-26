@@ -2,43 +2,39 @@
   "config": {
     "step": {
       "user": {
-        "title": "Elehant Water",
-        "description": "Configure scan interval",
         "data": {
-          "scan_interval": "Scan interval (seconds)"
-        }
-      },
-      "counter": {
-        "title": "Add counter",
-        "description": "Add a counter to monitor",
-        "data": {
-          "counter_id": "Counter ID (from device)",
-          "counter_type": "Counter type",
-          "name": "Friendly name (optional)"
-        }
-      },
-      "counter_confirm": {
-        "title": "Add another counter?",
-        "description": "Do you want to add another counter?",
-        "data": {
-          "add_another": "Yes, add another counter"
+          "device_id": "Device ID (from sticker, e.g., 11225)",
+          "device_name": "Device Name"
         }
       }
     },
     "error": {
-      "id_exists": "This counter ID already exists"
+      "invalid_id": "Device ID must be numeric"
     },
     "abort": {
-      "already_configured": "Integration is already configured"
+      "already_configured": "Device is already configured"
     }
   },
   "options": {
     "step": {
       "init": {
-        "title": "Elehant Water Options",
         "data": {
-          "scan_interval": "Scan interval (seconds)"
+          "unit_of_measurement": "Unit of measurement",
+          "bluetooth_adapter": "Bluetooth adapter (leave empty for default)"
         }
+      }
+    }
+  },
+  "selector": {
+    "unit_of_measurement": {
+      "options": {
+        "m³": "Cubic meters",
+        "L": "Liters"
+      }
+    },
+    "bluetooth_adapter": {
+      "options": {
+        "": "Default system adapter"
       }
     }
   }
