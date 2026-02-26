@@ -1,12 +1,12 @@
 {
-  "domain": "elehant_water_new",
-  "name": "Elehant Water and Gas Sensors NEW",
-  "codeowners": ["@SzenProgs", "@fess17", "@SCRAME314"],
-  "config_flow": true,
-  "dependencies": ["bluetooth"],
-  "documentation": "https://github.com/SCRAME314/elehant_water_new",
-  "integration_type": "hub",
-  "iot_class": "local_polling",
-  "requirements": [],
-  "version": "1.2.3a"
+    "domain": "elehant_water_new",
+    "name": "Elehant Water and Gas Sensors NEW",
+    "codeowners": ["@SzenProgs", "@fess17", "@SCRAME314"],
+    "config_flow": true,
+    "dependencies": ["bluetooth"],
+    "documentation": "https://github.com/SCRAME314/elehant_water",
+    "integration_type": "hub",
+    "iot_class": "local_polling",
+    "requirements": [],
+    "version": "1.2.3"
 }
