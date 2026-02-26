@@ -2,43 +2,39 @@
   "config": {
     "step": {
       "user": {
-        "title": "Elehant Water",
-        "description": "Настройте интервал сканирования",
         "data": {
-          "scan_interval": "Интервал сканирования (секунд)"
-        }
-      },
-      "counter": {
-        "title": "Добавление счетчика",
-        "description": "Добавьте счетчик для отслеживания",
-        "data": {
-          "counter_id": "ID счетчика (с устройства)",
-          "counter_type": "Тип счетчика",
-          "name": "Отображаемое имя (необязательно)"
-        }
-      },
-      "counter_confirm": {
-        "title": "Добавить еще счетчик?",
-        "description": "Хотите добавить еще один счетчик?",
-        "data": {
-          "add_another": "Да, добавить еще счетчик"
+          "device_id": "ID устройства (с наклейки, например 11225)",
+          "device_name": "Имя устройства"
         }
       }
     },
     "error": {
-      "id_exists": "Такой ID счетчика уже существует"
+      "invalid_id": "ID устройства должен быть числовым"
     },
     "abort": {
-      "already_configured": "Интеграция уже настроена"
+      "already_configured": "Устройство уже настроено"
     }
   },
   "options": {
     "step": {
       "init": {
-        "title": "Настройки Elehant Water",
         "data": {
-          "scan_interval": "Интервал сканирования (секунд)"
+          "unit_of_measurement": "Единица измерения",
+          "bluetooth_adapter": "Адаптер Bluetooth (оставьте пустым для системного)"
         }
+      }
+    }
+  },
+  "selector": {
+    "unit_of_measurement": {
+      "options": {
+        "m³": "Кубические метры",
+        "L": "Литры"
+      }
+    },
+    "bluetooth_adapter": {
+      "options": {
+        "": "Системный адаптер"
       }
     }
   }
