@@ -1,47 +1,25 @@
 """Config flow for Elehant Water integration."""
-from __future__ import annotations
 
 import logging
-from typing import Any
-
 import voluptuous as vol
 
+from bleak import get_adapters
 from homeassistant import config_entries
-from homeassistant.core import HomeAssistant
-from homeassistant.data_entry_flow import FlowResult
-from homeassistant.exceptions import HomeAssistantError
+from homeassistant.core import callback
+from homeassistant.helpers import selector
 
 from .const import (
-    CONF_COUNTERS,
-    CONF_COUNTER_ID,
-    CONF_COUNTER_TYPE,
-    CONF_NAME,
-    CONF_SCAN_INTERVAL,
-    COUNTER_TYPE_WATER,
-    COUNTER_TYPE_GAS,
-    DEFAULT_SCAN_INTERVAL,
+    CONF_DEVICE_ID,
+    CONF_DEVICE_NAME,
+    CONF_UNIT_OF_MEASUREMENT,
+    CONF_BLUETOOTH_ADAPTER,
+    DEFAULT_UNIT,
     DOMAIN,
+    UNIT_CUBIC_METERS,
+    UNIT_LITERS,
 )
 
 _LOGGER = logging.getLogger(__name__)
-
-STEP_USER_DATA_SCHEMA = vol.Schema(
-    {
-        vol.Required(CONF_SCAN_INTERVAL, default=DEFAULT_SCAN_INTERVAL): vol.All(
-            vol.Coerce(int), vol.Range(min=10, max=3600)
-        ),
-    }
-)
-
-STEP_COUNTER_SCHEMA = vol.Schema(
-    {
-        vol.Required(CONF_COUNTER_ID): str,
-        vol.Required(CONF_COUNTER_TYPE, default=COUNTER_TYPE_WATER): vol.In(
-            {COUNTER_TYPE_WATER: "Water", COUNTER_TYPE_GAS: "Gas"}
-        ),
-        vol.Optional(CONF_NAME): str,
-    }
-)
 
 
 class ElehantConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -49,71 +27,99 @@ class ElehantConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     VERSION = 1
 
-    def __init__(self):
-        """Initialize flow."""
-        self.data = {
-            CONF_COUNTERS: [],
-            CONF_SCAN_INTERVAL: DEFAULT_SCAN_INTERVAL,
-        }
-        self.current_counter = {}
-
-    async def async_step_user(
-        self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
+    async def async_step_user(self, user_input=None):
         """Handle the initial step."""
         errors = {}
 
         if user_input is not None:
-            self.data[CONF_SCAN_INTERVAL] = user_input[CONF_SCAN_INTERVAL]
-            return await self.async_step_counter()
-
-        return self.async_show_form(
-            step_id="user", data_schema=STEP_USER_DATA_SCHEMA, errors=errors
-        )
-
-    async def async_step_counter(
-        self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
-        """Handle adding counters."""
-        errors = {}
-
-        if user_input is not None:
-            # Проверяем уникальность ID
-            counter_id = user_input[CONF_COUNTER_ID]
-            for counter in self.data[CONF_COUNTERS]:
-                if counter[CONF_COUNTER_ID] == counter_id:
-                    errors["base"] = "id_exists"
-                    break
+            device_id = user_input[CONF_DEVICE_ID].strip()
+            # Validate device ID (should be numeric, at least 3 digits)
+            if not device_id.isdigit():
+                errors[CONF_DEVICE_ID] = "invalid_id"
             else:
-                # Добавляем счетчик
-                counter_data = {
-                    CONF_COUNTER_ID: counter_id,
-                    CONF_COUNTER_TYPE: user_input[CONF_COUNTER_TYPE],
-                }
-                if CONF_NAME in user_input and user_input[CONF_NAME]:
-                    counter_data[CONF_NAME] = user_input[CONF_NAME]
-                
-                self.data[CONF_COUNTERS].append(counter_data)
+                # Check if already configured
+                await self.async_set_unique_id(device_id)
+                self._abort_if_unique_id_configured()
 
-                # Спрашиваем, добавить еще счетчик
-                return await self.async_step_counter_confirm()
+                # Proceed to options? Or create entry directly.
+                # We'll create entry now and let user configure units later.
+                return self.async_create_entry(
+                    title=user_input[CONF_DEVICE_NAME],
+                    data={
+                        CONF_DEVICE_ID: device_id,
+                        CONF_DEVICE_NAME: user_input[CONF_DEVICE_NAME],
+                    },
+                )
 
+        # Show form
         return self.async_show_form(
-            step_id="counter", data_schema=STEP_COUNTER_SCHEMA, errors=errors
+            step_id="user",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(CONF_DEVICE_ID): str,
+                    vol.Required(CONF_DEVICE_NAME, default="Elehant Meter"): str,
+                }
+            ),
+            errors=errors,
         )
 
-    async def async_step_counter_confirm(
-        self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
-        """Ask to add another counter."""
+    @staticmethod
+    @callback
+    def async_get_options_flow(config_entry):
+        """Get the options flow for this handler."""
+        return ElehantOptionsFlow(config_entry)
+
+
+class ElehantOptionsFlow(config_entries.OptionsFlow):
+    """Handle options."""
+
+    def __init__(self, config_entry):
+        """Initialize options flow."""
+        self.config_entry = config_entry
+
+    async def async_step_init(self, user_input=None):
+        """Manage options."""
         if user_input is not None:
-            if user_input.get("add_another", False):
-                return await self.async_step_counter()
-            return self.async_create_entry(title="Elehant Water", data=self.data)
+            return self.async_create_entry(title="", data=user_input)
+
+        # Get current values
+        current_unit = self.config_entry.options.get(
+            CONF_UNIT_OF_MEASUREMENT,
+            self.config_entry.data.get(CONF_UNIT_OF_MEASUREMENT, DEFAULT_UNIT)
+        )
+        current_adapter = self.config_entry.options.get(
+            CONF_BLUETOOTH_ADAPTER,
+            self.config_entry.data.get(CONF_BLUETOOTH_ADAPTER)
+        )
+
+        # Get available Bluetooth adapters
+        adapters = await get_adapters()
+        adapter_names = [adapter.name for adapter in adapters if adapter.name]
+        adapter_names.insert(0, "")  # Empty option for default
 
         return self.async_show_form(
-            step_id="counter_confirm",
+            step_id="init",
             data_schema=vol.Schema(
-                {vol.Optional("add_another", default=False): bool}
+                {
+                    vol.Optional(
+                        CONF_UNIT_OF_MEASUREMENT,
+                        default=current_unit,
+                    ): selector.SelectSelector(
+                        selector.SelectSelectorConfig(
+                            options=[UNIT_CUBIC_METERS, UNIT_LITERS],
+                            translation_key="unit_of_measurement",
+                        )
+                    ),
+                    vol.Optional(
+                        CONF_BLUETOOTH_ADAPTER,
+                        description={"suggested_value": current_adapter},
+                    ): selector.SelectSelector(
+                        selector.SelectSelectorConfig(
+                            options=adapter_names,
+                            mode=selector.SelectSelectorMode.DROPDOWN,
+                            translation_key="bluetooth_adapter",
+                        )
+                    ),
+                }
             ),
         )
