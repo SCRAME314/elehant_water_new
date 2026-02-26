@@ -149,14 +149,16 @@ async def async_setup_entry(
     hass.loop.create_task(scanner.async_start())
     
     # Сохраняем сканер в hass.data для возможного доступа позже
-    if DOMAIN not in hass.data:
-        hass.data[DOMAIN] = {}
-    if entry.entry_id not in hass.data[DOMAIN]:
-        hass.data[DOMAIN][entry.entry_id] = {}
-    hass.data[DOMAIN][entry.entry_id]["scanner"] = scanner
+if DOMAIN not in hass.data:
+    hass.data[DOMAIN] = {}
     
-    _LOGGER.info("🚀 Сканер Elehant запущен в фоновом режиме")
-    return True
+if entry.entry_id not in hass.data[DOMAIN]:
+    # ВАЖНО: инициализируем как dict, а не mappingproxy
+    hass.data[DOMAIN][entry.entry_id] = {}
+    
+# Теперь можно безопасно добавлять scanner
+hass.data[DOMAIN][entry.entry_id]["scanner"] = scanner
+_LOGGER.info(f"🚀 Сканер сохранен в hass.data для entry {entry.entry_id}")
 
 
 class ElehantCounterSensor(SensorEntity):
@@ -490,3 +492,4 @@ class ElehantScanner:
         else:
             _LOGGER.debug(f"⚠️ Не найдены данные счетчика в пакете от {service_info.address}")
             return None
+
