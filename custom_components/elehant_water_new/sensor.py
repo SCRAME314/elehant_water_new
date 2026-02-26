@@ -35,6 +35,7 @@ from .const import (
     COUNTER_TYPE_WATER,
     DATA_COORDINATOR,
     DATA_DEVICES,
+    DATA_CONFIG,  # ← ЭТО НУЖНО ДОБАВИТЬ
     DOMAIN,
     ATTR_BATTERY_LEVEL,
     ATTR_RSSI,
@@ -166,3 +167,4 @@ class ElehantCounterSensor(CoordinatorEntity, SensorEntity):
     def _handle_coordinator_update(self) -> None:
         """Handle updated data from the coordinator."""
         self.async_write_ha_state()
+
