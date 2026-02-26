@@ -1,60 +1,40 @@
 """Constants for the Elehant Water integration."""
 
+from homeassistant.const import Platform
+
 DOMAIN = "elehant_water_new"
+PLATFORMS = [Platform.SENSOR]
 
-# Конфигурация
-CONF_COUNTERS = "counters"
-CONF_COUNTER_ID = "counter_id"
-CONF_COUNTER_TYPE = "counter_type"
-CONF_NAME = "name"
+# Configuration
+CONF_DEVICE_ID = "device_id"
+CONF_DEVICE_NAME = "device_name"
+CONF_UNIT_OF_MEASUREMENT = "unit_of_measurement"
+CONF_BLUETOOTH_ADAPTER = "bluetooth_adapter"
 
-# Типы счетчиков
-COUNTER_TYPE_WATER = "water"
-COUNTER_TYPE_GAS = "gas"
+# Units
+UNIT_CUBIC_METERS = "m³"
+UNIT_LITERS = "L"
 
-# Опции
-CONF_SCAN_INTERVAL = "scan_interval"
-DEFAULT_SCAN_INTERVAL = 60
+# Default values
+DEFAULT_UNIT = UNIT_CUBIC_METERS
+DEFAULT_SCAN_INTERVAL = 300  # Not used in new logic, kept for compatibility
 
-# MAC-маски для определения производителя и типа устройства
-# Счетчики воды СГБТ (газ?) / Возможно газовые счетчики
-MAC_MASK_GAS = [
-    'b0:10:01',
-    'b0:11:01',
-    'b0:12:01',
-    'b0:32:01',
-    'b0:42:01'
-]
+# Manufacturer data parsing constants (based on Zud71/elehant_meter)
+# Byte indexes (0-based)
+IDX_DATA_LENGTH = 0          # Byte 0: Always 0x0E (14) for this device?
+IDX_MANUFACTURER_ID = 1      # Bytes 1-2: Manufacturer ID (0x055B)
+IDX_FLAGS = 3                # Byte 3: Flags? (0x00)
+IDX_PAYLOAD_START = 4        # Byte 4: Start of actual payload? (0x0F?)
+IDX_SERIAL_START = 6         # Bytes 6,7,8 (3 bytes): Serial number (e.g., 0x00,0x2B,0xC1 -> 11201)
+IDX_SERIAL_LEN = 3
+IDX_COUNTER_START = 9        # Bytes 9,10,11,12 (4 bytes): Counter value in 0.1 units (liters?)
+IDX_COUNTER_LEN = 4
+IDX_BATTERY = 13             # Byte 13: Battery level (0-100%)
+IDX_TEMP_START = 14          # Bytes 14,15 (2 bytes): Temperature in Celsius * 10 (signed short)
+IDX_TEMP_LEN = 2
 
-# Счетчики воды СВД (с температурой)
-MAC_MASK_WATER_TEMP = [
-    'b0:01:02',
-    'b0:02:02'
-]
+# Expected first byte of manufacturer data
+EXPECTED_FIRST_BYTE = 0x80
 
-# Счетчики воды СВТ (двухтарифные)
-MAC_MASK_WATER_DUAL = [
-    'b0:03:02',
-    'b0:04:02',
-    'b0:05:02',
-    'b0:06:02'
-]
-
-# Все маски для воды (для удобства проверки)
-MAC_MASK_WATER = MAC_MASK_WATER_TEMP + MAC_MASK_WATER_DUAL
-
-# Ключи для хранения данных в hass.data
-DATA_COORDINATOR = "coordinator"
-DATA_CONFIG = "config"
-DATA_DEVICES = "devices"
-DATA_SCANNER = "scanner"
-
-# Атрибуты сенсоров
-ATTR_BATTERY_LEVEL = "battery_level"
-ATTR_RSSI = "rssi"
-ATTR_COUNTER_TYPE = "counter_type"
-ATTR_LAST_SEEN = "last_seen"
-ATTR_TEMPERATURE = "temperature"  # для СВД
-ATTR_TARIFF_1 = "tariff_1"  # для двухтарифных
-ATTR_TARIFF_2 = "tariff_2"  # для двухтарифных
-ATTR_CURRENT_TARIFF = "current_tariff"  # текущий активный тариф
+# Manufacturer ID (for reference, not used for filtering)
+MANUFACTURER_ID_ELEHANT = 0x055B
