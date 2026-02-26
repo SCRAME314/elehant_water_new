@@ -3,7 +3,7 @@
 import logging
 import voluptuous as vol
 
-from bleak import get_adapters
+from bleak import BleakScanner
 from homeassistant import config_entries
 from homeassistant.core import callback
 from homeassistant.helpers import selector
@@ -20,6 +20,24 @@ from .const import (
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def get_bluetooth_adapters_sync():
+    """Synchronously get Bluetooth adapters (workaround)."""
+    adapters = ["default"]
+    try:
+        # Try to get adapter info
+        import subprocess
+        result = subprocess.run(["hciconfig"], capture_output=True, text=True)
+        if result.returncode == 0:
+            lines = result.stdout.split('\n')
+            for line in lines:
+                if line.startswith('hci'):
+                    adapter = line.split(':')[0]
+                    adapters.append(adapter)
+    except Exception:
+        pass
+    return adapters
 
 
 class ElehantConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -92,11 +110,9 @@ class ElehantOptionsFlow(config_entries.OptionsFlow):
             self.config_entry.data.get(CONF_BLUETOOTH_ADAPTER)
         )
 
-        # Get available Bluetooth adapters
-        adapters = await get_adapters()
-        adapter_names = [adapter.name for adapter in adapters if adapter.name]
-        adapter_names.insert(0, "")  # Empty option for default
-
+        # Get available Bluetooth adapters (run in executor to avoid blocking)
+        adapters = await self.hass.async_add_executor_job(get_bluetooth_adapters_sync)
+        
         return self.async_show_form(
             step_id="init",
             data_schema=vol.Schema(
@@ -115,7 +131,7 @@ class ElehantOptionsFlow(config_entries.OptionsFlow):
                         description={"suggested_value": current_adapter},
                     ): selector.SelectSelector(
                         selector.SelectSelectorConfig(
-                            options=adapter_names,
+                            options=adapters,
                             mode=selector.SelectSelectorMode.DROPDOWN,
                             translation_key="bluetooth_adapter",
                         )
