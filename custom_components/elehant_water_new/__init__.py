@@ -1,98 +1,98 @@
 """Init for Elehant Water integration."""
-from __future__ import annotations
 
 import asyncio
-from datetime import timedelta
 import logging
 
+from bleak import get_adapters
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
+from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
-from .const import (
-    CONF_COUNTERS,
-    CONF_SCAN_INTERVAL,
-    DEFAULT_SCAN_INTERVAL,
-    DATA_COORDINATOR,
-    DATA_CONFIG,
-    DATA_DEVICES,
-    DATA_SCANNER,
-    DOMAIN,
-)
+from .const import CONF_DEVICE_ID, CONF_DEVICE_NAME, DOMAIN, PLATFORMS
 from .scanner import ElehantScanner
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS: list[Platform] = [Platform.SENSOR]
-
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Elehant Water from a config entry."""
-    # Инициализация данных в hass.data
     hass.data.setdefault(DOMAIN, {})
-    
-    # Сохраняем конфигурацию
-    config = {
-        CONF_COUNTERS: entry.data.get(CONF_COUNTERS, []),
-    }
-    
-    # Добавляем опции
-    scan_interval = entry.options.get(
-        CONF_SCAN_INTERVAL, 
-        entry.data.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
-    )
-    
-    hass.data[DOMAIN][entry.entry_id] = {
-        DATA_CONFIG: config,
-        DATA_DEVICES: {},  # Здесь будут храниться данные счетчиков {counter_id: {state, attributes}}
-        DATA_SCANNER: None,
-        DATA_COORDINATOR: None,
-    }
 
-    # Создаем сканер Bluetooth
-    scanner = ElehantScanner(hass, entry.entry_id)
-    hass.data[DOMAIN][entry.entry_id][DATA_SCANNER] = scanner
+    device_id = entry.data[CONF_DEVICE_ID]
+    device_name = entry.data[CONF_DEVICE_NAME]
 
-    # Создаем координатор для обновления данных
+    # Create coordinator for this device
     async def async_update_data():
-        """Update data from Bluetooth scanner."""
-        return await scanner.async_update()
+        # This function is not used for polling; data comes from scanner.
+        # But coordinator needs a method; we'll raise if no data yet.
+        # Alternatively, we can return last data if available.
+        coordinator = hass.data[DOMAIN][device_id]
+        if coordinator.data:
+            return coordinator.data
+        raise UpdateFailed("No data from device yet")
 
     coordinator = DataUpdateCoordinator(
         hass,
         _LOGGER,
-        name=DOMAIN,
+        name=f"Elehant {device_name}",
         update_method=async_update_data,
-        update_interval=timedelta(seconds=scan_interval),
+        # No update_interval - we push updates from scanner
     )
-    
-    hass.data[DOMAIN][entry.entry_id][DATA_COORDINATOR] = coordinator
+    coordinator.config_entry = entry  # Store entry for access in scanner
+    hass.data[DOMAIN][device_id] = coordinator
 
-    # Первое обновление данных
-    await coordinator.async_config_entry_first_refresh()
+    # Register device
+    device_registry = dr.async_get(hass)
+    device_registry.async_get_or_create(
+        config_entry_id=entry.entry_id,
+        identifiers={(DOMAIN, device_id)},
+        name=device_name,
+        manufacturer="Elehant",
+        model="Water Meter",
+        sw_version="1.0",
+    )
 
-    # Настраиваем платформы
+    # Forward setup to sensor platform
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+
+    # Start the global scanner if not already running
+    if "scanner" not in hass.data[DOMAIN]:
+        # Get available adapters
+        adapters = await get_adapters()
+        adapter_names = [adapter.name for adapter in adapters if adapter.name]
+        # Get selected adapter from config entry (first device sets the scanner)
+        selected_adapter = entry.data.get("bluetooth_adapter")  # We'll need to add this to config flow
+        if selected_adapter and selected_adapter not in adapter_names:
+            _LOGGER.warning("Selected adapter %s not found, using default", selected_adapter)
+            selected_adapter = None
+
+        # Create scanner, passing all coordinators for lookup
+        scanner = ElehantScanner(
+            hass,
+            hass.data[DOMAIN],  # dict of device_id -> coordinator
+            adapter_names,
+            selected_adapter
+        )
+        hass.data[DOMAIN]["scanner"] = scanner
+        await scanner.async_start()
 
     return True
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
-    if unload_ok := await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
-        # Останавливаем сканер
-        scanner = hass.data[DOMAIN][entry.entry_id].get(DATA_SCANNER)
+    device_id = entry.data[CONF_DEVICE_ID]
+    coordinator = hass.data[DOMAIN].pop(device_id, None)
+
+    # Forward unload to platforms
+    unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+
+    # If no more devices, stop scanner
+    if unload_ok and len(hass.data[DOMAIN]) == 1:  # Only "scanner" left
+        scanner = hass.data[DOMAIN].pop("scanner", None)
         if scanner:
             await scanner.async_stop()
-        
-        # Удаляем данные
-        hass.data[DOMAIN].pop(entry.entry_id)
 
     return unload_ok
-
-
-async def async_reload_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Reload config entry."""
-    await async_unload_entry(hass, entry)
-    await async_setup_entry(hass, entry)
